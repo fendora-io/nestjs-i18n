@@ -57,7 +57,6 @@ const defaultOptions: Partial<I18nOptions> = {
   loader: I18nJsonLoader,
 };
 
-@Global()
 @Module({})
 export class I18nModule implements OnModuleInit, OnModuleDestroy, NestModule {
   private unsubscribe = new Subject<void>();
