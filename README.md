@@ -2,7 +2,7 @@
   <a href="https://nestjs-i18n.com/" target="_blank"><img src="https://nestjs-i18n.com/img/logo.svg" width="600" alt="nestjs-i18n Logo" /></a>
 </p>
 <p align="center">
-  The i18n library for <a href="https://nestjs.com" target="_blank">nestjs</a>. It makes working with languages in your nestjs project easy. Everything is made to be highly configurable. You can write and plug-in your own language resolvers or loaders.
+  The i18n (non-global) library for <a href="https://nestjs.com" target="_blank">nestjs</a>. It makes working with languages in your nestjs project easy. Everything is made to be highly configurable. You can write and plug-in your own language resolvers or loaders.
   <p align="center">
     <a href="https://www.npmjs.com/package/nestjs-i18n" target="_blank"><img alt="npm version" src="https://img.shields.io/npm/v/nestjs-i18n" /></a>
     <a href="https://www.npmjs.com/package/nestjs-i18n" target="_blank"><img alt="NPM" src="https://img.shields.io/npm/l/nestjs-i18n" /></a>
