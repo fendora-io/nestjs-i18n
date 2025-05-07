@@ -1,6 +1,5 @@
 import {
   DynamicModule,
-  Global,
   Inject,
   Logger,
   MiddlewareConsumer,
