@@ -6,7 +6,6 @@ import {
   Module,
   OnModuleDestroy,
   Provider,
-  Optional,
 } from '@nestjs/common';
 import {
   I18N_OPTIONS,
@@ -17,9 +16,6 @@ import {
   I18N_LANGUAGES_SUBJECT,
   I18N_TRANSLATIONS_SUBJECT,
 } from './i18n.constants';
-
-// Feature module specific constants
-export const I18N_FEATURE_OPTIONS = 'I18nFeatureOptions';
 import { I18nService } from './services/i18n.service';
 import {
   I18nAsyncOptions,
@@ -60,11 +56,6 @@ const defaultOptions: Partial<I18nOptions> = {
   loader: I18nJsonLoader,
 };
 
-export interface I18nFeatureOptions {
-  path: string;
-  watch?: boolean;
-}
-
 @Module({})
 export class I18nModule implements OnModuleInit, OnModuleDestroy, NestModule {
   private unsubscribe = new Subject<void>();
@@ -75,53 +66,11 @@ export class I18nModule implements OnModuleInit, OnModuleDestroy, NestModule {
     private translations: Observable<I18nTranslation>,
     @Inject(I18N_OPTIONS) private readonly i18nOptions: I18nOptions,
     private adapter: HttpAdapterHost,
-    @Optional()
-    @Inject(I18N_FEATURE_OPTIONS)
-    private readonly featureOptions?: I18nFeatureOptions[],
   ) {}
 
   async onModuleInit() {
     // makes sure languages & translations are loaded before application loads
     await this.i18n.refresh();
-
-    // If there are feature-specific translations, load and merge them
-    if (this.featureOptions && this.featureOptions.length > 0) {
-      for (const featureOption of this.featureOptions) {
-        // Create a loader for each feature module's translations
-        const loader = new this.i18nOptions.loader();
-        const loaderOptions = {
-          ...this.i18nOptions.loaderOptions,
-          path: featureOption.path,
-          watch: featureOption.watch ?? this.i18nOptions.loaderOptions?.watch,
-        };
-
-        // Initialize the loader with feature-specific options
-        loader['options'] = loaderOptions;
-
-        // Load feature-specific translations and merge them
-        const featureTranslations = await loader.load();
-        if (featureTranslations instanceof Observable) {
-          featureTranslations
-            .pipe(takeUntil(this.unsubscribe))
-            .subscribe((translations) => {
-              const currentTranslations = this.i18n.getTranslations();
-              const mergedTranslations = this.mergeTranslations(
-                currentTranslations,
-                translations,
-              );
-              this.i18n.refresh(mergedTranslations);
-            });
-        } else {
-          // Merge feature translations with existing translations
-          const currentTranslations = this.i18n.getTranslations();
-          const mergedTranslations = this.mergeTranslations(
-            currentTranslations,
-            featureTranslations,
-          );
-          await this.i18n.refresh(mergedTranslations);
-        }
-      }
-    }
 
     // Register handlebars helper
     if (this.i18nOptions.viewEngine == 'hbs') {
@@ -195,35 +144,6 @@ export class I18nModule implements OnModuleInit, OnModuleDestroy, NestModule {
     this.unsubscribe.complete();
   }
 
-  /**
-   * Merges translations from different sources
-   * @param baseTranslations The base translations object
-   * @param newTranslations The new translations to merge
-   * @returns The merged translations object
-   */
-  private mergeTranslations(
-    baseTranslations: I18nTranslation,
-    newTranslations: I18nTranslation,
-  ): I18nTranslation {
-    const result = { ...baseTranslations };
-
-    // Iterate through all languages in the new translations
-    Object.keys(newTranslations).forEach((lang) => {
-      if (!result[lang]) {
-        // If language doesn't exist in base, add it
-        result[lang] = newTranslations[lang];
-      } else {
-        // If language exists, merge the translations using the mergeDeep utility
-        result[lang] = mergeDeep(
-          result[lang] as I18nTranslation,
-          newTranslations[lang],
-        );
-      }
-    });
-
-    return result;
-  }
-
   configure(consumer: MiddlewareConsumer) {
     if (this.i18nOptions.disableMiddleware) return;
 
@@ -277,13 +197,12 @@ export class I18nModule implements OnModuleInit, OnModuleDestroy, NestModule {
           } else {
             i18nTranslationSubject.next(translation);
           }
-          // Feature module translations will be loaded in onModuleInit
         } catch (e) {
           logger.error('parsing translation error', e);
         }
         return i18nTranslationSubject.asObservable();
       },
-      inject: [I18nLoader, { token: I18N_FEATURE_OPTIONS, optional: true }],
+      inject: [I18nLoader],
     };
 
     const languagesProvider = {
@@ -301,18 +220,12 @@ export class I18nModule implements OnModuleInit, OnModuleDestroy, NestModule {
         }
         return i18nLanguagesSubject.asObservable();
       },
-      inject: [I18nLoader, { token: I18N_FEATURE_OPTIONS, optional: true }],
+      inject: [I18nLoader],
     };
 
     const resolversProvider = {
       provide: I18N_RESOLVERS,
       useValue: options.resolvers || [],
-    };
-
-    // Initialize an empty array for feature options if none exist yet
-    const featureOptionsProvider = {
-      provide: I18N_FEATURE_OPTIONS,
-      useValue: [],
     };
 
     return {
@@ -332,41 +245,105 @@ export class I18nModule implements OnModuleInit, OnModuleDestroy, NestModule {
         i18nLoaderOptionsProvider,
         i18nLanguagesSubjectProvider,
         i18nTranslationSubjectProvider,
-        featureOptionsProvider,
         ...this.createResolverProviders(options.resolvers),
       ],
-      exports: [
-        I18N_OPTIONS,
-        I18N_RESOLVERS,
-        I18nService,
-        languagesProvider,
-        I18N_FEATURE_OPTIONS,
-      ],
+      exports: [I18N_OPTIONS, I18N_RESOLVERS, I18nService, languagesProvider],
     };
   }
 
-  /**
-   * Register feature-specific translations for a feature module
-   * @param options Feature module translation options
-   */
-  static forFeature(options: I18nFeatureOptions): DynamicModule {
+  static forFeature(options: Partial<I18nOptions>): DynamicModule {
+    const featureOptions = this.sanitizeI18nOptions(options);
+    const i18nLanguagesSubject = new BehaviorSubject<string[]>([]);
+    const i18nTranslationSubject = new BehaviorSubject<I18nTranslation>({});
+
+    const i18nOptions: ValueProvider = {
+      provide: I18N_OPTIONS,
+      useValue: featureOptions,
+    };
+
+    const i18nLoaderProvider: ClassProvider = {
+      provide: I18nLoader,
+      useClass: featureOptions.loader,
+    };
+
+    const i18nLoaderOptionsProvider: ValueProvider = {
+      provide: I18N_LOADER_OPTIONS,
+      useValue: featureOptions.loaderOptions,
+    };
+
+    const i18nLanguagesSubjectProvider: ValueProvider = {
+      provide: I18N_LANGUAGES_SUBJECT,
+      useValue: i18nLanguagesSubject,
+    };
+
+    const i18nTranslationSubjectProvider: ValueProvider = {
+      provide: I18N_TRANSLATIONS_SUBJECT,
+      useValue: i18nTranslationSubject,
+    };
+
+    const translationsProvider = {
+      provide: I18N_TRANSLATIONS,
+      useFactory: async (
+        loader: I18nLoader,
+      ): Promise<Observable<I18nTranslation>> => {
+        try {
+          const translation = await loader.load();
+          if (translation instanceof Observable) {
+            translation.subscribe(i18nTranslationSubject);
+          } else {
+            i18nTranslationSubject.next(translation);
+          }
+        } catch (e) {
+          logger.error('parsing translation error', e);
+        }
+        return i18nTranslationSubject.asObservable();
+      },
+      inject: [I18nLoader],
+    };
+
+    const languagesProvider = {
+      provide: I18N_LANGUAGES,
+      useFactory: async (loader: I18nLoader): Promise<Observable<string[]>> => {
+        try {
+          const languages = await loader.languages();
+          if (languages instanceof Observable) {
+            languages.subscribe(i18nLanguagesSubject);
+          } else {
+            i18nLanguagesSubject.next(languages);
+          }
+        } catch (e) {
+          logger.error('parsing translation error', e);
+        }
+        return i18nLanguagesSubject.asObservable();
+      },
+      inject: [I18nLoader],
+    };
+
+    const resolversProvider = {
+      provide: I18N_RESOLVERS,
+      useValue: featureOptions.resolvers || [],
+    };
+
     return {
       module: I18nModule,
       providers: [
+        { provide: Logger, useValue: logger },
         {
-          provide: I18N_FEATURE_OPTIONS,
-          useFactory: (existingFeatureOptions: I18nFeatureOptions[] = []) => {
-            return [...existingFeatureOptions, options];
-          },
-          inject: [
-            {
-              token: I18N_FEATURE_OPTIONS,
-              optional: true,
-            },
-          ],
+          provide: APP_INTERCEPTOR,
+          useClass: I18nLanguageInterceptor,
         },
+        I18nService,
+        i18nOptions,
+        translationsProvider,
+        languagesProvider,
+        resolversProvider,
+        i18nLoaderProvider,
+        i18nLoaderOptionsProvider,
+        i18nLanguagesSubjectProvider,
+        i18nTranslationSubjectProvider,
+        ...this.createResolverProviders(featureOptions.resolvers),
       ],
-      exports: [I18N_FEATURE_OPTIONS],
+      exports: [I18N_OPTIONS, I18N_RESOLVERS, I18nService, languagesProvider],
     };
   }
 
@@ -478,19 +455,12 @@ export class I18nModule implements OnModuleInit, OnModuleDestroy, NestModule {
           } else {
             translationsSubject.next(translation);
           }
-
-          // Feature module translations will be loaded in onModuleInit
-          // This allows the root module to initialize first, then feature modules can add their translations
         } catch (e) {
           logger.error('parsing translation error', e);
         }
         return translationsSubject.asObservable();
       },
-      inject: [
-        I18nLoader,
-        I18N_TRANSLATIONS_SUBJECT,
-        { token: I18N_FEATURE_OPTIONS, optional: true },
-      ],
+      inject: [I18nLoader, I18N_TRANSLATIONS_SUBJECT],
     };
   }
 
@@ -513,11 +483,7 @@ export class I18nModule implements OnModuleInit, OnModuleDestroy, NestModule {
         }
         return languagesSubject.asObservable();
       },
-      inject: [
-        I18nLoader,
-        I18N_LANGUAGES_SUBJECT,
-        { token: I18N_FEATURE_OPTIONS, optional: true },
-      ],
+      inject: [I18nLoader, I18N_LANGUAGES_SUBJECT],
     };
   }
 
