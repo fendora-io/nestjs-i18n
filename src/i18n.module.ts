@@ -229,6 +229,7 @@ export class I18nModule implements OnModuleInit, OnModuleDestroy, NestModule {
     };
 
     return {
+      global: true,
       module: I18nModule,
       providers: [
         { provide: Logger, useValue: logger },
