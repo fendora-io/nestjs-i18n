@@ -253,23 +253,24 @@ export class I18nModule implements OnModuleInit, OnModuleDestroy, NestModule {
   }
 
   static forFeature(options: Partial<I18nOptions>): DynamicModule {
-    const featureOptions = this.sanitizeI18nOptions(options);
+    options = this.sanitizeI18nOptions(options);
+
     const i18nLanguagesSubject = new BehaviorSubject<string[]>([]);
     const i18nTranslationSubject = new BehaviorSubject<I18nTranslation>({});
 
     const i18nOptions: ValueProvider = {
       provide: I18N_OPTIONS,
-      useValue: featureOptions,
+      useValue: options,
     };
 
     const i18nLoaderProvider: ClassProvider = {
       provide: I18nLoader,
-      useClass: featureOptions.loader,
+      useClass: options.loader,
     };
 
     const i18nLoaderOptionsProvider: ValueProvider = {
       provide: I18N_LOADER_OPTIONS,
-      useValue: featureOptions.loaderOptions,
+      useValue: options.loaderOptions,
     };
 
     const i18nLanguagesSubjectProvider: ValueProvider = {
@@ -322,7 +323,7 @@ export class I18nModule implements OnModuleInit, OnModuleDestroy, NestModule {
 
     const resolversProvider = {
       provide: I18N_RESOLVERS,
-      useValue: featureOptions.resolvers || [],
+      useValue: options.resolvers || [],
     };
 
     return {
@@ -342,7 +343,7 @@ export class I18nModule implements OnModuleInit, OnModuleDestroy, NestModule {
         i18nLoaderOptionsProvider,
         i18nLanguagesSubjectProvider,
         i18nTranslationSubjectProvider,
-        ...this.createResolverProviders(featureOptions.resolvers),
+        ...this.createResolverProviders(options.resolvers),
       ],
       exports: [I18N_OPTIONS, I18N_RESOLVERS, I18nService, languagesProvider],
     };
